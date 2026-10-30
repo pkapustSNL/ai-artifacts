@@ -83,7 +83,15 @@ summary{cursor:pointer;color:var(--gold)}
   <input id="target2" class="tgt" placeholder="Commit to branch (blank = loaded; new name creates it)" autocapitalize="off" autocorrect="off">
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
-  <div class="row"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button></div>
+  <div class="row"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button><button id="promote" disabled>Promote</button></div>
+  <details id="promo"><summary>🚀 Promote to company repo</summary>
+   <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
+    <input id="prepo" placeholder="owner/repo" autocapitalize="off" autocorrect="off">
+    <input id="pbase" placeholder="base branch (blank = default)" autocapitalize="off" autocorrect="off">
+    <input id="pprefix" placeholder="path prefix in target (blank = same path)" autocapitalize="off" autocorrect="off">
+    <button id="pgo" class="primary">Open promotion PR</button>
+   </div>
+  </details>
  </div>
 </div>
 
@@ -112,7 +120,8 @@ const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&qu
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
 const b64d=b=>new TextDecoder().decode(Uint8Array.from(atob(b),c=>c.charCodeAt(0)));
 const b64e=s=>{let r="";for(const b of new TextEncoder().encode(s))r+=String.fromCharCode(b);return btoa(r)};
-function msg(t,cls){const m=$("#msg");m.textContent=t;m.className=cls||""}
+function msg(t,cls,url){const m=$("#msg");m.textContent=t;m.className=cls||"";
+ if(url){const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener";a.textContent=" "+url;m.appendChild(a)}}
 
 async function gh(path,opt={}){
  const r=await fetch(API+path,{...opt,headers:{Accept:"application/vnd.github+json",Authorization:"Bearer "+S.token,...(opt.body?{"Content-Type":"application/json"}:{})}});
@@ -162,7 +171,7 @@ async function loadRepo(){
   localStorage.setItem("gh_repo",repo);
   $("#branch").value=branch;document.querySelectorAll(".tgt").forEach(e=>e.value="");
   $("#title").textContent="🌹 "+repo;
-  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
+  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#promote").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
   document.body.classList.remove("editing");
   render();msg(t.truncated?"Repo is large; list may be incomplete":"","err");
  }catch(e){msg(e.message,"err")}
@@ -175,7 +184,7 @@ async function openItem(p){
   S.cur={path:p,sha:f.sha};S.dirty=false;
   $("#path").textContent=`${p} @ ${S.branch}`;
   $("#content").value=b64d(f.content);$("#content").disabled=false;$("#save").disabled=false;
-  $("#delete").disabled=false;$("#rename").disabled=!!SINGLETONS[p];
+  $("#delete").disabled=false;$("#promote").disabled=false;$("#rename").disabled=!!SINGLETONS[p];
   document.body.classList.add("editing");msg("");render();
  }catch(e){msg(e.message,"err")}
 }
@@ -298,6 +307,43 @@ async function rename(){
  }catch(e){msg(e.message,"err")}
 }
 const target0=()=>$("#target").value.trim()||S.branch;
+const PROMO_DEFAULT="snl-Engineering/.github";
+async function promote(){
+ if(!S.cur)return;
+ if(S.dirty)return msg("Save your edits before promoting","err");
+ const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
+ const repo=$("#prepo").value.trim(),prefix=$("#pprefix").value.trim().replace(/^\/+|\/+$/g,"");
+ if(!/^[\w.-]+\/[\w.-]+$/.test(repo))return msg("Enter target as owner/repo","err");
+ if(repo===S.repo&&!prefix)return msg("Target is the source repo; set a path prefix","err");
+ if(!confirm(`Open a PR in ${repo} with ${item.name}?`))return;
+ $("#pgo").disabled=true;
+ try{
+  msg("Promoting…");
+  const info=await gh(`/repos/${repo}`);
+  const base=$("#pbase").value.trim()||info.default_branch;
+  const src=await gh(`/repos/${S.repo}/git/trees/${encodeURIComponent(S.branch)}?recursive=1`);
+  const files=artifactFiles(src.tree,item);
+  if(!files.length)throw new Error("Not found on "+S.branch);
+  const dest=p=>prefix?prefix+"/"+p:p;
+  const entries=[];
+  for(const f of files){
+   const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
+   const nb=await gh(`/repos/${repo}/git/blobs`,{method:"POST",body:JSON.stringify({content:b.content.replace(/\n/g,""),encoding:"base64"})});
+   entries.push({path:dest(f.path),mode:f.mode,type:"blob",sha:nb.sha});
+  }
+  const ref=await gh(`/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
+  const commit=await gh(`/repos/${repo}/git/commits/${ref.object.sha}`);
+  const tree=await gh(`/repos/${repo}/git/trees`,{method:"POST",body:JSON.stringify({base_tree:commit.tree.sha,tree:entries})});
+  const title=`Promote ${item.type} ${item.name}`;
+  const nc=await gh(`/repos/${repo}/git/commits`,{method:"POST",body:JSON.stringify({message:title+`\n\nPromoted from ${S.repo}@${S.branch}`,tree:tree.sha,parents:[ref.object.sha]})});
+  const branch=`promote/${item.name}-${Date.now().toString(36)}`;
+  await gh(`/repos/${repo}/git/refs`,{method:"POST",body:JSON.stringify({ref:`refs/heads/${branch}`,sha:nc.sha})});
+  const pr=await gh(`/repos/${repo}/pulls`,{method:"POST",body:JSON.stringify({title,head:branch,base,body:`Promoted from \`${S.repo}\` (branch \`${S.branch}\`):\n\n${entries.map(e=>"- `"+e.path+"`").join("\n")}`})});
+  localStorage.setItem("gh_promo",JSON.stringify({repo,base:$("#pbase").value.trim(),prefix}));
+  msg("PR opened:","ok",pr.html_url);
+ }catch(e){msg(e.message+(e.status===404?" (token needs access to the target repo: Contents + Pull requests write)":""),"err")}
+ $("#pgo").disabled=false;
+}
 const SINGLETONS_REV=Object.fromEntries(Object.entries(SINGLETONS).map(([p,n])=>[n,p]));
 
 $("#signin").onclick=async()=>{
@@ -316,6 +362,8 @@ $("#content").oninput=()=>S.dirty=true;
 $("#save").onclick=save;
 $("#create").onclick=create;
 $("#delete").onclick=del;
+$("#promote").onclick=()=>{$("#promo").open=true;$("#promo").scrollIntoView()};
+$("#pgo").onclick=promote;
 $("#rename").onclick=rename;
 $("#back").onclick=()=>{if(!S.dirty||confirm("Discard unsaved changes?")){S.dirty=false;document.body.classList.remove("editing")}};
 document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();save()}});
@@ -330,6 +378,8 @@ async function init(){
   const rs=await gh("/user/repos?sort=pushed&per_page=100");
   $("#repos").innerHTML=rs.map(r=>`<option value="${esc(r.full_name)}">`).join("");
  }catch(e){if(e.status===401){$("#logout").click();$("#loginmsg").textContent="Token rejected";return}}
+ const pr=JSON.parse(localStorage.getItem("gh_promo")||"null")||{repo:PROMO_DEFAULT,base:"",prefix:""};
+ $("#prepo").value=pr.repo;$("#pbase").value=pr.base;$("#pprefix").value=pr.prefix;
  if($("#repo").value)loadRepo();
 }
 init();

@@ -12,6 +12,7 @@ A static installable PWA served from the repo root by GitHub Pages: https://pkap
 - On iPhone: open the URL in Safari > Share > Add to Home Screen.
 - To commit to a different branch (e.g. a protected `main`), fill in "Commit to branch"; it is created if missing.
 - Use **Rename** / **Delete** in the editor. Each is a single commit (skills move or delete their whole folder; renaming a skill also updates its `name:`). Both honour "Commit to branch".
+- **Promote** opens a PR in a target repo (default `snl-Engineering/.github`) containing the artifact (a skill promotes its whole folder). Your token needs Contents and Pull requests write access to that repo. Set a path prefix if the target keeps artifacts elsewhere.
 
 ## Local server (`server.js`)
 
