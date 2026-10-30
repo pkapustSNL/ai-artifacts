@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b5cff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Artifacts">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>AI Artifacts</title>
+<style>
+:root{color-scheme:light dark;--bd:#8884;--bg2:#8881;--ac:#0b5cff}
+*{box-sizing:border-box}
+body{margin:0;font:16px system-ui,-apple-system,sans-serif;height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--bd)}
+header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input,select,button,textarea{font:inherit;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}
+button{cursor:pointer;background:var(--bg2)}button.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
+button:disabled{opacity:.5}
+#app{flex:1;display:flex;min-height:0}
+#side{width:340px;border-right:1px solid var(--bd);overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+#editor{flex:1;display:flex;flex-direction:column;padding:12px;gap:8px;min-width:0}
+textarea{flex:1;font:14px ui-monospace,Menlo,monospace;resize:none;white-space:pre;overflow:auto;tab-size:2}
+h3{margin:12px 0 2px;font-size:12px;text-transform:uppercase;color:#888}
+.item{padding:11px 10px;border-radius:8px;display:flex;justify-content:space-between;gap:8px;cursor:pointer}
+.item:hover,.item.sel{background:var(--bg2)}.tag{font-size:12px;color:#888}
+.row{display:flex;gap:8px}.row>*{flex:1;min-width:0}
+#path{font-size:13px;color:#888;word-break:break-all}
+#msg{font-size:14px;min-height:1.2em}.err{color:#d33}.ok{color:#2a8a2a}
+#login{max-width:460px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+small{color:#888;line-height:1.4}
+.hidden{display:none!important}
+#back{display:none}
+@media(max-width:700px){
+ #side{width:100%;border:0}
+ #editor{display:none}
+ body.editing #side{display:none}body.editing #editor{display:flex}
+ body.editing #back{display:inline-block}
+}
+</style></head><body>
+<header>
+ <button id="back">‹ List</button>
+ <h1 id="title">AI Artifacts</h1>
+ <button id="reload" class="hidden">↻</button>
+ <button id="logout" class="hidden">Sign out</button>
+</header>
+
+<div id="login" class="hidden">
+ <p>Manage agents, instructions, prompts, skills and hooks stored in your GitHub repos.</p>
+ <input id="token" type="password" placeholder="GitHub token" autocomplete="off" autocapitalize="off">
+ <small>Use a fine-grained personal access token with <b>Contents: Read and write</b> on the repos you want to manage. It is stored only in this browser (localStorage) and sent only to api.github.com.</small>
+ <button id="signin" class="primary">Sign in</button>
+ <div id="loginmsg" class="err"></div>
+</div>
+
+<div id="app" class="hidden">
+ <div id="side">
+  <input id="repo" list="repos" placeholder="owner/repo" autocapitalize="off" autocorrect="off">
+  <datalist id="repos"></datalist>
+  <div class="row">
+   <input id="branch" placeholder="branch (default)" autocapitalize="off" autocorrect="off">
+   <button id="load" class="primary">Load</button>
+  </div>
+  <input id="filter" placeholder="Filter…">
+  <details>
+   <summary>New artifact</summary>
+   <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
+    <select id="type"></select>
+    <input id="name" placeholder="name (e.g. code-reviewer)" autocapitalize="off">
+    <button id="create">Create</button>
+   </div>
+  </details>
+  <div id="list"></div>
+ </div>
+ <div id="editor">
+  <div id="path">Select an artifact</div>
+  <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+  <input id="target" placeholder="Commit to branch (blank = loaded branch)" autocapitalize="off" autocorrect="off">
+  <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
+  <div id="msg"></div>
+ </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const API="https://api.github.com";
+const TYPES={
+ agent:{label:"Agents",file:n=>`.github/agents/${n}.agent.md`,re:/^\.github\/agents\/([^/]+)\.agent\.md$/},
+ instruction:{label:"Instructions",file:n=>`.github/instructions/${n}.instructions.md`,re:/^\.github\/instructions\/([^/]+)\.instructions\.md$/},
+ prompt:{label:"Prompts",file:n=>`.github/prompts/${n}.prompt.md`,re:/^\.github\/prompts\/([^/]+)\.prompt\.md$/},
+ skill:{label:"Skills",file:n=>`.github/skills/${n}/SKILL.md`,re:/^\.github\/skills\/([^/]+)\/SKILL\.md$/},
+ hook:{label:"Hooks",file:n=>`.github/hooks/${n}.json`,re:/^\.github\/hooks\/([^/]+)\.json$/},
+};
+const SINGLETONS={".github/copilot-instructions.md":"copilot-instructions","AGENTS.md":"AGENTS"};
+const TEMPLATES={
+ agent:n=>`---\ndescription: Describe what this agent does\n# tools: ['codebase', 'search']\n---\n\nYou are ${n}. Describe the agent's behavior here.\n`,
+ instruction:()=>`---\napplyTo: "**"\n---\n\nWrite your instructions here.\n`,
+ prompt:()=>`---\ndescription: Describe this prompt\n---\n\nWrite your prompt here.\n`,
+ skill:n=>`---\nname: ${n}\ndescription: Describe what this skill does and when to use it\n---\n\n# ${n}\n\nSkill instructions here.\n`,
+ hook:()=>`{\n  "version": 1,\n  "hooks": {\n    "preToolUse": []\n  }\n}\n`,
+};
+const NAME_RE=/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const S={token:localStorage.getItem("gh_token")||"",repo:"",branch:"",items:[],cur:null,dirty:false};
+
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
+const b64d=b=>new TextDecoder().decode(Uint8Array.from(atob(b),c=>c.charCodeAt(0)));
+const b64e=s=>{let r="";for(const b of new TextEncoder().encode(s))r+=String.fromCharCode(b);return btoa(r)};
+function msg(t,cls){const m=$("#msg");m.textContent=t;m.className=cls||""}
+
+async function gh(path,opt={}){
+ const r=await fetch(API+path,{...opt,headers:{Accept:"application/vnd.github+json",Authorization:"Bearer "+S.token,...(opt.body?{"Content-Type":"application/json"}:{})}});
+ const j=r.status===204?null:await r.json().catch(()=>null);
+ if(!r.ok){const e=new Error(j&&j.message||r.statusText);e.status=r.status;throw e}
+ return j;
+}
+
+function show(){
+ const authed=!!S.token;
+ $("#login").classList.toggle("hidden",authed);
+ $("#app").classList.toggle("hidden",!authed);
+ $("#logout").classList.toggle("hidden",!authed);
+ $("#reload").classList.toggle("hidden",!authed);
+}
+
+function classify(tree){
+ const items=[];
+ for(const e of tree){
+  if(e.type!=="blob")continue;
+  if(SINGLETONS[e.path]){items.push({type:"instruction",name:SINGLETONS[e.path],path:e.path});continue}
+  for(const [t,d] of Object.entries(TYPES)){const m=e.path.match(d.re);if(m){items.push({type:t,name:m[1],path:e.path});break}}
+ }
+ return items;
+}
+
+function render(){
+ const f=$("#filter").value.toLowerCase();let h="";
+ for(const t in TYPES){
+  const xs=S.items.filter(i=>i.type===t&&i.name.toLowerCase().includes(f));
+  if(!xs.length)continue;
+  h+=`<h3>${TYPES[t].label} (${xs.length})</h3>`;
+  for(const i of xs)h+=`<div class="item${S.cur&&S.cur.path===i.path?" sel":""}" data-path="${esc(i.path)}"><span>${esc(i.name)}</span></div>`;
+ }
+ $("#list").innerHTML=h||(S.repo?"<small>No artifacts found in this repo/branch. Create one above.</small>":"");
+}
+
+async function loadRepo(){
+ const repo=$("#repo").value.trim();
+ if(!/^[\w.-]+\/[\w.-]+$/.test(repo))return msg("Enter repo as owner/repo","err");
+ try{
+  msg("Loading…");
+  const info=await gh(`/repos/${repo}`);
+  const branch=$("#branch").value.trim()||info.default_branch;
+  const t=await gh(`/repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+  Object.assign(S,{repo,branch,items:classify(t.tree),cur:null,dirty:false});
+  localStorage.setItem("gh_repo",repo);
+  $("#branch").value=branch;$("#target").value="";
+  $("#title").textContent=repo;
+  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#path").textContent="Select an artifact";
+  document.body.classList.remove("editing");
+  render();msg(t.truncated?"Repo is large; list may be incomplete":"","err");
+ }catch(e){msg(e.message,"err")}
+}
+
+async function openItem(p){
+ if(S.dirty&&!confirm("Discard unsaved changes?"))return;
+ try{
+  const f=await gh(`/repos/${S.repo}/contents/${encPath(p)}?ref=${encodeURIComponent(S.branch)}`);
+  S.cur={path:p,sha:f.sha};S.dirty=false;
+  $("#path").textContent=`${p} @ ${S.branch}`;
+  $("#content").value=b64d(f.content);$("#content").disabled=false;$("#save").disabled=false;
+  document.body.classList.add("editing");msg("");render();
+ }catch(e){msg(e.message,"err")}
+}
+
+async function ensureBranch(target){
+ if(target===S.branch)return;
+ try{await gh(`/repos/${S.repo}/git/ref/heads/${encodeURIComponent(target)}`);return}
+ catch(e){if(e.status!==404)throw e}
+ const base=await gh(`/repos/${S.repo}/git/ref/heads/${encodeURIComponent(S.branch)}`);
+ await gh(`/repos/${S.repo}/git/refs`,{method:"POST",body:JSON.stringify({ref:`refs/heads/${target}`,sha:base.object.sha})});
+}
+
+async function putFile(path,content,message,{mustBeNew}={}){
+ const target=$("#target").value.trim()||S.branch;
+ await ensureBranch(target);
+ let sha;
+ try{sha=(await gh(`/repos/${S.repo}/contents/${encPath(path)}?ref=${encodeURIComponent(target)}`)).sha}
+ catch(e){if(e.status!==404)throw e}
+ if(sha&&mustBeNew)throw new Error("Already exists on "+target);
+ const r=await gh(`/repos/${S.repo}/contents/${encPath(path)}`,{method:"PUT",body:JSON.stringify({message,content:b64e(content),branch:target,...(sha?{sha}:{})})});
+ return {target,sha:r.content.sha};
+}
+
+async function save(){
+ if(!S.cur)return;
+ $("#save").disabled=true;
+ try{
+  msg("Saving…");
+  const m=$("#commitmsg").value.trim()||`Update ${S.cur.path}`;
+  const r=await putFile(S.cur.path,$("#content").value,m);
+  const p=S.cur.path;
+  S.dirty=false;S.cur.sha=r.sha;$("#commitmsg").value="";
+  if(r.target!==S.branch){$("#branch").value=r.target;await loadRepo();await openItem(p)}
+  msg("Saved to "+r.target,"ok");
+ }catch(e){msg(e.message,"err")}
+ $("#save").disabled=false;
+}
+
+async function create(){
+ const type=$("#type").value,name=$("#name").value.trim();
+ if(!S.repo)return msg("Load a repo first","err");
+ if(!NAME_RE.test(name))return msg("Invalid name","err");
+ const path=SINGLETONS_REV[name]&&type==="instruction"?SINGLETONS_REV[name]:TYPES[type].file(name);
+ try{
+  msg("Creating…");
+  const r=await putFile(path,TEMPLATES[type](name),`Add ${path}`,{mustBeNew:true});
+  $("#name").value="";
+  if(r.target!==S.branch)$("#branch").value=r.target;
+  await loadRepo();await openItem(path);
+ }catch(e){msg(e.message,"err")}
+}
+const SINGLETONS_REV=Object.fromEntries(Object.entries(SINGLETONS).map(([p,n])=>[n,p]));
+
+$("#signin").onclick=async()=>{
+ const t=$("#token").value.trim();if(!t)return;
+ S.token=t;
+ try{const u=await gh("/user");localStorage.setItem("gh_token",t);$("#token").value="";$("#loginmsg").textContent="";init()}
+ catch(e){S.token="";$("#loginmsg").textContent=e.message}
+};
+$("#logout").onclick=()=>{localStorage.removeItem("gh_token");S.token="";S.items=[];show()};
+$("#load").onclick=loadRepo;
+$("#reload").onclick=()=>{if(S.repo)loadRepo()};
+$("#filter").oninput=render;
+$("#list").onclick=e=>{const i=e.target.closest(".item");if(i)openItem(i.dataset.path)};
+$("#content").oninput=()=>S.dirty=true;
+$("#save").onclick=save;
+$("#create").onclick=create;
+$("#back").onclick=()=>{if(!S.dirty||confirm("Discard unsaved changes?")){S.dirty=false;document.body.classList.remove("editing")}};
+document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();save()}});
+window.addEventListener("beforeunload",e=>{if(S.dirty){e.preventDefault();e.returnValue=""}});
+
+async function init(){
+ show();
+ $("#type").innerHTML=Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v.label.replace(/s$/,"")}</option>`).join("");
+ if(!S.token)return;
+ $("#repo").value=localStorage.getItem("gh_repo")||"";
+ try{
+  const rs=await gh("/user/repos?sort=pushed&per_page=100");
+  $("#repos").innerHTML=rs.map(r=>`<option value="${esc(r.full_name)}">`).join("");
+ }catch(e){if(e.status===401){$("#logout").click();$("#loginmsg").textContent="Token rejected";return}}
+ if($("#repo").value)loadRepo();
+}
+init();
+if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js");
+</script></body></html>
