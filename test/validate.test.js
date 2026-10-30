@@ -81,3 +81,12 @@ test("nested instructions are validated", () => {
   const bad = validate(repo({ ".github/instructions/backend/api.instructions.md": "---\napplyTo: '**'\n---\nTODO\n" }));
   assert.match(msgs(bad), /placeholder/);
 });
+
+test("core.checkFile validates a single artifact (browser entry point)", () => {
+  const { checkFile } = require("../scripts/core");
+  assert.deepEqual(checkFile("agent", "a.agent.md", "---\ndescription: x\n---\nBody\n"), []);
+  assert.match(checkFile("agent", "a.agent.md", "---\ntools: []\n---\nBody\n").map((p) => p.msg).join(), /description/);
+  assert.match(checkFile("skill", "SKILL.md", "---\nname: a\ndescription: d\n---\nB\n", "b").map((p) => p.msg).join(), /must match folder/);
+  assert.match(checkFile("hook", "h.json", "{").map((p) => p.msg).join(), /invalid JSON/);
+  assert.match(checkFile("other", "x.sh", "token=abcdefghijklmnop1234").map((p) => p.msg).join(), /credential/);
+});
