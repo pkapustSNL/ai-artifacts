@@ -304,9 +304,15 @@ async function rename(){
    const oldRoot=item.type==="skill"?item.path.replace(/\/SKILL\.md$/,""):item.path;
    const newRoot=item.type==="skill"?newPath.replace(/\/SKILL\.md$/,""):newPath;
    if(tree.some(e=>e.path===newRoot||e.path.startsWith(newRoot+"/")))throw new Error("Already exists on "+target0());
+   const moves=fs.map(f=>({f,np:newRoot+f.path.slice(oldRoot.length)}));
+   if(item.type==="instruction"){
+    // Children live in a folder named after the parent; move that folder along.
+    const od=`.github/instructions/${item.name}/`,nd=`.github/instructions/${name}/`;
+    if(tree.some(e=>e.path.startsWith(nd)&&!e.path.startsWith(od)))throw new Error("Folder "+nd+" already exists on "+target0());
+    for(const e of tree)if(e.type==="blob"&&e.path.startsWith(od))moves.push({f:e,np:nd+e.path.slice(od.length)});
+   }
    const out=[];
-   for(const f of fs){
-    const np=newRoot+f.path.slice(oldRoot.length);
+   for(const {f,np} of moves){
     let sha=f.sha;
     if(item.type==="skill"&&f.path===item.path){
      const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
