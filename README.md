@@ -1,5 +1,7 @@
 # AI Artifacts
 
+Toggle between the Rose and Chicago Bears themes with the button in the header.
+
 Create, read and update Copilot artifacts (agents, instructions, prompts, skills, hooks,
 `copilot-instructions.md`, `AGENTS.md`) in your GitHub repos.
 
