@@ -72,7 +72,7 @@ summary{cursor:pointer;color:var(--gold)}
    <summary>🌀 New artifact</summary>
    <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
     <select id="type"></select>
-    <input id="name" placeholder="name (e.g. code-reviewer)" autocapitalize="off">
+    <input id="name" placeholder="name (instructions: parent/child ok)" autocapitalize="off">
     <button id="create">Create</button>
    </div>
   </details>
@@ -84,6 +84,7 @@ summary{cursor:pointer;color:var(--gold)}
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
   <div class="row"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button><button id="promote" disabled>Promote</button></div>
+  <div class="row"><button id="subadd" disabled>＋ Sub-instruction</button></div>
   <details id="promo"><summary>🚀 Promote to company repo</summary>
    <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
     <input id="prepo" placeholder="owner/repo" autocapitalize="off" autocorrect="off">
@@ -100,7 +101,7 @@ const $=s=>document.querySelector(s);
 const API="https://api.github.com";
 const TYPES={
  agent:{label:"Agents",file:n=>`.github/agents/${n}.agent.md`,re:/^\.github\/agents\/([^/]+)\.agent\.md$/},
- instruction:{label:"Instructions",file:n=>`.github/instructions/${n}.instructions.md`,re:/^\.github\/instructions\/([^/]+)\.instructions\.md$/},
+ instruction:{label:"Instructions",file:n=>`.github/instructions/${n}.instructions.md`,re:/^\.github\/instructions\/((?:[^/]+\/){0,2}[^/]+)\.instructions\.md$/},
  prompt:{label:"Prompts",file:n=>`.github/prompts/${n}.prompt.md`,re:/^\.github\/prompts\/([^/]+)\.prompt\.md$/},
  skill:{label:"Skills",file:n=>`.github/skills/${n}/SKILL.md`,re:/^\.github\/skills\/([^/]+)\/SKILL\.md$/},
  hook:{label:"Hooks",file:n=>`.github/hooks/${n}.json`,re:/^\.github\/hooks\/([^/]+)\.json$/},
@@ -114,6 +115,8 @@ const TEMPLATES={
  hook:()=>`{\n  "version": 1,\n  "hooks": {\n    "preToolUse": []\n  }\n}\n`,
 };
 const NAME_RE=/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+// Instructions may be nested as parent/child (up to 3 levels) in subfolders of .github/instructions.
+const validName=(type,n)=>(type==="instruction"?n.split("/").length<=3:!n.includes("/"))&&n.split("/").every(x=>NAME_RE.test(x));
 const S={token:localStorage.getItem("gh_token")||"",repo:"",branch:"",items:[],cur:null,dirty:false};
 
 const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -151,10 +154,11 @@ function classify(tree){
 function render(){
  const f=$("#filter").value.toLowerCase();let h="";
  for(const t in TYPES){
-  const xs=S.items.filter(i=>i.type===t&&i.name.toLowerCase().includes(f));
+  const xs=S.items.filter(i=>i.type===t&&i.name.toLowerCase().includes(f)).sort((a,b)=>a.name.localeCompare(b.name));
   if(!xs.length)continue;
   h+=`<h3>${TYPES[t].label} (${xs.length})</h3>`;
-  for(const i of xs)h+=`<div class="item${S.cur&&S.cur.path===i.path?" sel":""}" data-path="${esc(i.path)}"><span>${esc(i.name)}</span></div>`;
+  for(const i of xs){const d=i.name.split("/").length-1,leaf=i.name.split("/").pop();
+   h+=`<div class="item${S.cur&&S.cur.path===i.path?" sel":""}" data-path="${esc(i.path)}" style="padding-left:${12+d*18}px"><span>${d?"↳ ":""}${esc(leaf)}</span></div>`}
  }
  $("#list").innerHTML=h||(S.repo?"<small>🎸 Nothing here yet. Start a new jam above.</small>":"");
 }
@@ -171,12 +175,13 @@ async function loadRepo(){
   localStorage.setItem("gh_repo",repo);
   $("#branch").value=branch;document.querySelectorAll(".tgt").forEach(e=>e.value="");
   $("#title").textContent="🌹 "+repo;
-  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#promote").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
+  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#promote").disabled=true;$("#subadd").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
   document.body.classList.remove("editing");
   render();msg(t.truncated?"Repo is large; list may be incomplete":"","err");
  }catch(e){msg(e.message,"err")}
 }
 
+const item0=p=>S.items.find(i=>i.path===p);
 async function openItem(p){
  if(S.dirty&&!confirm("Discard unsaved changes?"))return;
  try{
@@ -184,7 +189,7 @@ async function openItem(p){
   S.cur={path:p,sha:f.sha};S.dirty=false;
   $("#path").textContent=`${p} @ ${S.branch}`;
   $("#content").value=b64d(f.content);$("#content").disabled=false;$("#save").disabled=false;
-  $("#delete").disabled=false;$("#promote").disabled=false;$("#rename").disabled=!!SINGLETONS[p];
+  $("#delete").disabled=false;$("#promote").disabled=false;$("#subadd").disabled=!(item0(p)&&item0(p).type==="instruction"&&!SINGLETONS[p]);$("#rename").disabled=!!SINGLETONS[p];
   document.body.classList.add("editing");msg("");render();
  }catch(e){msg(e.message,"err")}
 }
@@ -224,9 +229,11 @@ async function save(){
 }
 
 async function create(){
- const type=$("#type").value,name=$("#name").value.trim();
+ await createArtifact($("#type").value,$("#name").value.trim());
+}
+async function createArtifact(type,name){
  if(!S.repo)return msg("Load a repo first","err");
- if(!NAME_RE.test(name))return msg("Invalid name","err");
+ if(!validName(type,name))return msg("Invalid name","err");
  const path=SINGLETONS_REV[name]&&type==="instruction"?SINGLETONS_REV[name]:TYPES[type].file(name);
  try{
   msg("Creating…");
@@ -236,119 +243,12 @@ async function create(){
   await loadRepo();await openItem(path);
  }catch(e){msg(e.message,"err")}
 }
-// Artifact paths a change touches: the whole folder for skills, else the single file.
-function artifactFiles(tree,item){
- const m=item.path.match(/^(\.github\/skills\/[^/]+)\/SKILL\.md$/);
- return tree.filter(e=>e.type==="blob"&&(m?e.path.startsWith(m[1]+"/"):e.path===item.path));
-}
-
-async function commitChanges(message,build){
- const target=$("#target").value.trim()||S.branch;
- await ensureBranch(target);
- const ref=await gh(`/repos/${S.repo}/git/ref/heads/${encodeURIComponent(target)}`);
- const commit=await gh(`/repos/${S.repo}/git/commits/${ref.object.sha}`);
- const t=await gh(`/repos/${S.repo}/git/trees/${commit.tree.sha}?recursive=1`);
- const entries=await build(t.tree);
- const nt=await gh(`/repos/${S.repo}/git/trees`,{method:"POST",body:JSON.stringify({base_tree:commit.tree.sha,tree:entries})});
- const nc=await gh(`/repos/${S.repo}/git/commits`,{method:"POST",body:JSON.stringify({message,tree:nt.sha,parents:[ref.object.sha]})});
- await gh(`/repos/${S.repo}/git/refs/heads/${encodeURIComponent(target)}`,{method:"PATCH",body:JSON.stringify({sha:nc.sha})});
- return target;
-}
-
-async function afterChange(target){
- if(target!==S.branch)$("#branch").value=target;
- S.dirty=false;
- await loadRepo();
-}
-
-async function del(){
- if(!S.cur)return;
- const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
- if(!confirm(`Delete ${item.type==="skill"?"skill folder for ":""}${item.name}?`))return;
- try{
-  msg("Deleting…");
-  const target=await commitChanges($("#commitmsg").value.trim()||`Delete ${item.path}`,
-   tree=>{const fs=artifactFiles(tree,item);if(!fs.length)throw new Error("Not found on target branch");return fs.map(f=>({path:f.path,mode:f.mode,type:"blob",sha:null}))});
-  $("#commitmsg").value="";
-  await afterChange(target);msg("Deleted on "+target,"ok");
- }catch(e){msg(e.message,"err")}
-}
-
-async function rename(){
- if(!S.cur||SINGLETONS[S.cur.path])return;
- if(S.dirty)return msg("Save or discard your edits before renaming","err");
- const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
- const name=(prompt("New name",item.name)||"").trim();
- if(!name||name===item.name)return;
- if(!NAME_RE.test(name))return msg("Invalid name","err");
- const newPath=TYPES[item.type].file(name);
- try{
-  msg("Renaming…");
-  const target=await commitChanges($("#commitmsg").value.trim()||`Rename ${item.name} to ${name}`,async tree=>{
-   const fs=artifactFiles(tree,item);if(!fs.length)throw new Error("Not found on target branch");
-   const oldRoot=item.type==="skill"?item.path.replace(/\/SKILL\.md$/,""):item.path;
-   const newRoot=item.type==="skill"?newPath.replace(/\/SKILL\.md$/,""):newPath;
-   if(tree.some(e=>e.path===newRoot||e.path.startsWith(newRoot+"/")))throw new Error("Already exists on "+target0());
-   const out=[];
-   for(const f of fs){
-    const np=newRoot+f.path.slice(oldRoot.length);
-    let sha=f.sha;
-    if(item.type==="skill"&&f.path===item.path){
-     const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
-     const txt=b64d(b.content.replace(/\n/g,"")).replace(/^(name:\s*).*$/m,`$1${name}`);
-     sha=(await gh(`/repos/${S.repo}/git/blobs`,{method:"POST",body:JSON.stringify({content:b64e(txt),encoding:"base64"})})).sha;
-    }
-    out.push({path:np,mode:f.mode,type:"blob",sha},{path:f.path,mode:f.mode,type:"blob",sha:null});
-   }
-   return out;
-  });
-  $("#commitmsg").value="";
-  await afterChange(target);await openItem(newPath);msg("Renamed on "+target,"ok");
- }catch(e){msg(e.message,"err")}
-}
-const target0=()=>$("#target").value.trim()||S.branch;
-// Company repo layout: org agents live in /agents; every other type is a copy-from library folder.
-const PROMO_DIRS={agent:"agents",instruction:"instructions",prompt:"prompts",skill:"skills",hook:"hooks"};
-function promoPath(item,p){
- if(SINGLETONS[item.path])return "templates/"+item.path.replace(/^\.github\//,"");
- return PROMO_DIRS[item.type]+"/"+p.split("/").slice(2).join("/");
-}
-const PROMO_DEFAULT="snl-Engineering/.github";
-async function promote(){
- if(!S.cur)return;
- if(S.dirty)return msg("Save your edits before promoting","err");
- const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
- const repo=$("#prepo").value.trim(),prefix=$("#pprefix").value.trim().replace(/^\/+|\/+$/g,"");
- if(!/^[\w.-]+\/[\w.-]+$/.test(repo))return msg("Enter target as owner/repo","err");
- if(repo===S.repo&&!prefix)return msg("Target is the source repo; set a path prefix","err");
- if(!confirm(`Open a PR in ${repo} with ${item.name}?`))return;
- $("#pgo").disabled=true;
- try{
-  msg("Promoting…");
-  const info=await gh(`/repos/${repo}`);
-  const base=$("#pbase").value.trim()||info.default_branch;
-  const src=await gh(`/repos/${S.repo}/git/trees/${encodeURIComponent(S.branch)}?recursive=1`);
-  const files=artifactFiles(src.tree,item);
-  if(!files.length)throw new Error("Not found on "+S.branch);
-  const dest=p=>(prefix?prefix+"/":"")+promoPath(item,p);
-  const entries=[];
-  for(const f of files){
-   const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
-   const nb=await gh(`/repos/${repo}/git/blobs`,{method:"POST",body:JSON.stringify({content:b.content.replace(/\n/g,""),encoding:"base64"})});
-   entries.push({path:dest(f.path),mode:f.mode,type:"blob",sha:nb.sha});
-  }
-  const ref=await gh(`/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
-  const commit=await gh(`/repos/${repo}/git/commits/${ref.object.sha}`);
-  const tree=await gh(`/repos/${repo}/git/trees`,{method:"POST",body:JSON.stringify({base_tree:commit.tree.sha,tree:entries})});
-  const title=`Promote ${item.type} ${item.name}`;
-  const nc=await gh(`/repos/${repo}/git/commits`,{method:"POST",body:JSON.stringify({message:title+`\n\nPromoted from ${S.repo}@${S.branch}`,tree:tree.sha,parents:[ref.object.sha]})});
-  const branch=`promote/${item.name}-${Date.now().toString(36)}`;
-  await gh(`/repos/${repo}/git/refs`,{method:"POST",body:JSON.stringify({ref:`refs/heads/${branch}`,sha:nc.sha})});
-  const pr=await gh(`/repos/${repo}/pulls`,{method:"POST",body:JSON.stringify({title,head:branch,base,body:`Promoted from \`${S.repo}\` (branch \`${S.branch}\`):\n\n${entries.map(e=>"- `"+e.path+"`").join("\n")}`})});
-  localStorage.setItem("gh_promo",JSON.stringify({repo,base:$("#pbase").value.trim(),prefix}));
-  msg("PR opened:","ok",pr.html_url);
- }catch(e){msg(e.message+(e.status===404?" (token needs access to the target repo: Contents + Pull requests write)":""),"err")}
- $("#pgo").disabled=false;
+async function addSub(){
+ const it=S.cur&&item0(S.cur.path);
+ if(!it||it.type!=="instruction"||SINGLETONS[it.path])return;
+ if(S.dirty)return msg("Save or discard your edits first","err");
+ const child=(prompt(`Sub-instruction name under "${it.name}"`)||"").trim();
+ if(child)await createArtifact("instruction",it.name+"/"+child);
 }
 const SINGLETONS_REV=Object.fromEntries(Object.entries(SINGLETONS).map(([p,n])=>[n,p]));
 
@@ -367,6 +267,7 @@ $("#list").onclick=e=>{const i=e.target.closest(".item");if(i)openItem(i.dataset
 $("#content").oninput=()=>S.dirty=true;
 $("#save").onclick=save;
 $("#create").onclick=create;
+$("#subadd").onclick=addSub;
 $("#delete").onclick=del;
 $("#promote").onclick=()=>{$("#promo").open=true;$("#promo").scrollIntoView()};
 $("#pgo").onclick=promote;

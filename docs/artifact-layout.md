@@ -49,6 +49,7 @@ AGENTS.md                              nearest-wins; may also appear in subfolde
 .github/
   copilot-instructions.md
   instructions/<name>.instructions.md
+  instructions/<parent>/<child>.instructions.md   sub-instructions (grouped by folder)
   prompts/<name>.prompt.md
   agents/<name>.agent.md
   skills/<name>/SKILL.md               + scripts/, references/, assets/

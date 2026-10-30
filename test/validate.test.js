@@ -70,3 +70,14 @@ test("wrong suffix and bad names are flagged", () => {
 test("empty repo has no problems", () => {
   assert.deepEqual(validate(repo({})).problems, []);
 });
+
+test("nested instructions are validated", () => {
+  const ok = validate(repo({
+    ".github/instructions/backend.instructions.md": "---\napplyTo: '**'\n---\nParent rules.\n",
+    ".github/instructions/backend/api.instructions.md": "---\napplyTo: 'src/api/**'\n---\nChild rules.\n",
+  }));
+  assert.equal(ok.count, 2);
+  assert.deepEqual(ok.problems, []);
+  const bad = validate(repo({ ".github/instructions/backend/api.instructions.md": "---\napplyTo: '**'\n---\nTODO\n" }));
+  assert.match(msgs(bad), /placeholder/);
+});
