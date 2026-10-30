@@ -64,6 +64,7 @@ small{color:#888;line-height:1.4}
    <input id="branch" placeholder="branch (default)" autocapitalize="off" autocorrect="off">
    <button id="load" class="primary">Load</button>
   </div>
+  <input id="target" placeholder="Commit to branch (blank = loaded; new name creates it)" autocapitalize="off" autocorrect="off">
   <input id="filter" placeholder="Filter…">
   <details>
    <summary>New artifact</summary>
@@ -78,7 +79,6 @@ small{color:#888;line-height:1.4}
  <div id="editor">
   <div id="path">Select an artifact</div>
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
-  <input id="target" placeholder="Commit to branch (blank = loaded branch)" autocapitalize="off" autocorrect="off">
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
  </div>
 </div>
