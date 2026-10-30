@@ -88,7 +88,7 @@ summary{cursor:pointer;color:var(--gold)}
    <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
     <input id="prepo" placeholder="owner/repo" autocapitalize="off" autocorrect="off">
     <input id="pbase" placeholder="base branch (blank = default)" autocapitalize="off" autocorrect="off">
-    <input id="pprefix" placeholder="path prefix in target (blank = same path)" autocapitalize="off" autocorrect="off">
+    <input id="pprefix" placeholder="extra path prefix (optional)" autocapitalize="off" autocorrect="off">
     <button id="pgo" class="primary">Open promotion PR</button>
    </div>
   </details>
@@ -307,6 +307,12 @@ async function rename(){
  }catch(e){msg(e.message,"err")}
 }
 const target0=()=>$("#target").value.trim()||S.branch;
+// Company repo layout: org agents live in /agents; every other type is a copy-from library folder.
+const PROMO_DIRS={agent:"agents",instruction:"instructions",prompt:"prompts",skill:"skills",hook:"hooks"};
+function promoPath(item,p){
+ if(SINGLETONS[item.path])return "templates/"+item.path.replace(/^\.github\//,"");
+ return PROMO_DIRS[item.type]+"/"+p.split("/").slice(2).join("/");
+}
 const PROMO_DEFAULT="snl-Engineering/.github";
 async function promote(){
  if(!S.cur)return;
@@ -324,7 +330,7 @@ async function promote(){
   const src=await gh(`/repos/${S.repo}/git/trees/${encodeURIComponent(S.branch)}?recursive=1`);
   const files=artifactFiles(src.tree,item);
   if(!files.length)throw new Error("Not found on "+S.branch);
-  const dest=p=>prefix?prefix+"/"+p:p;
+  const dest=p=>(prefix?prefix+"/":"")+promoPath(item,p);
   const entries=[];
   for(const f of files){
    const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
