@@ -250,6 +250,120 @@ async function addSub(){
  const child=(prompt(`Sub-instruction name under "${it.name}"`)||"").trim();
  if(child)await createArtifact("instruction",it.name+"/"+child);
 }
+// Artifact paths a change touches: the whole folder for skills, else the single file.
+function artifactFiles(tree,item){
+ const m=item.path.match(/^(\.github\/skills\/[^/]+)\/SKILL\.md$/);
+ return tree.filter(e=>e.type==="blob"&&(m?e.path.startsWith(m[1]+"/"):e.path===item.path));
+}
+
+async function commitChanges(message,build){
+ const target=$("#target").value.trim()||S.branch;
+ await ensureBranch(target);
+ const ref=await gh(`/repos/${S.repo}/git/ref/heads/${encodeURIComponent(target)}`);
+ const commit=await gh(`/repos/${S.repo}/git/commits/${ref.object.sha}`);
+ const t=await gh(`/repos/${S.repo}/git/trees/${commit.tree.sha}?recursive=1`);
+ const entries=await build(t.tree);
+ const nt=await gh(`/repos/${S.repo}/git/trees`,{method:"POST",body:JSON.stringify({base_tree:commit.tree.sha,tree:entries})});
+ const nc=await gh(`/repos/${S.repo}/git/commits`,{method:"POST",body:JSON.stringify({message,tree:nt.sha,parents:[ref.object.sha]})});
+ await gh(`/repos/${S.repo}/git/refs/heads/${encodeURIComponent(target)}`,{method:"PATCH",body:JSON.stringify({sha:nc.sha})});
+ return target;
+}
+
+async function afterChange(target){
+ if(target!==S.branch)$("#branch").value=target;
+ S.dirty=false;
+ await loadRepo();
+}
+
+async function del(){
+ if(!S.cur)return;
+ const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
+ if(!confirm(`Delete ${item.type==="skill"?"skill folder for ":""}${item.name}?`))return;
+ try{
+  msg("Deleting…");
+  const target=await commitChanges($("#commitmsg").value.trim()||`Delete ${item.path}`,
+   tree=>{const fs=artifactFiles(tree,item);if(!fs.length)throw new Error("Not found on target branch");return fs.map(f=>({path:f.path,mode:f.mode,type:"blob",sha:null}))});
+  $("#commitmsg").value="";
+  await afterChange(target);msg("Deleted on "+target,"ok");
+ }catch(e){msg(e.message,"err")}
+}
+
+async function rename(){
+ if(!S.cur||SINGLETONS[S.cur.path])return;
+ if(S.dirty)return msg("Save or discard your edits before renaming","err");
+ const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
+ const name=(prompt("New name",item.name)||"").trim();
+ if(!name||name===item.name)return;
+ if(!NAME_RE.test(name))return msg("Invalid name","err");
+ const newPath=TYPES[item.type].file(name);
+ try{
+  msg("Renaming…");
+  const target=await commitChanges($("#commitmsg").value.trim()||`Rename ${item.name} to ${name}`,async tree=>{
+   const fs=artifactFiles(tree,item);if(!fs.length)throw new Error("Not found on target branch");
+   const oldRoot=item.type==="skill"?item.path.replace(/\/SKILL\.md$/,""):item.path;
+   const newRoot=item.type==="skill"?newPath.replace(/\/SKILL\.md$/,""):newPath;
+   if(tree.some(e=>e.path===newRoot||e.path.startsWith(newRoot+"/")))throw new Error("Already exists on "+target0());
+   const out=[];
+   for(const f of fs){
+    const np=newRoot+f.path.slice(oldRoot.length);
+    let sha=f.sha;
+    if(item.type==="skill"&&f.path===item.path){
+     const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
+     const txt=b64d(b.content.replace(/\n/g,"")).replace(/^(name:\s*).*$/m,`$1${name}`);
+     sha=(await gh(`/repos/${S.repo}/git/blobs`,{method:"POST",body:JSON.stringify({content:b64e(txt),encoding:"base64"})})).sha;
+    }
+    out.push({path:np,mode:f.mode,type:"blob",sha},{path:f.path,mode:f.mode,type:"blob",sha:null});
+   }
+   return out;
+  });
+  $("#commitmsg").value="";
+  await afterChange(target);await openItem(newPath);msg("Renamed on "+target,"ok");
+ }catch(e){msg(e.message,"err")}
+}
+const target0=()=>$("#target").value.trim()||S.branch;
+// Company repo layout: org agents live in /agents; every other type is a copy-from library folder.
+const PROMO_DIRS={agent:"agents",instruction:"instructions",prompt:"prompts",skill:"skills",hook:"hooks"};
+function promoPath(item,p){
+ if(SINGLETONS[item.path])return "templates/"+item.path.replace(/^\.github\//,"");
+ return PROMO_DIRS[item.type]+"/"+p.split("/").slice(2).join("/");
+}
+const PROMO_DEFAULT="snl-Engineering/.github";
+async function promote(){
+ if(!S.cur)return;
+ if(S.dirty)return msg("Save your edits before promoting","err");
+ const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
+ const repo=$("#prepo").value.trim(),prefix=$("#pprefix").value.trim().replace(/^\/+|\/+$/g,"");
+ if(!/^[\w.-]+\/[\w.-]+$/.test(repo))return msg("Enter target as owner/repo","err");
+ if(repo===S.repo&&!prefix)return msg("Target is the source repo; set a path prefix","err");
+ if(!confirm(`Open a PR in ${repo} with ${item.name}?`))return;
+ $("#pgo").disabled=true;
+ try{
+  msg("Promoting…");
+  const info=await gh(`/repos/${repo}`);
+  const base=$("#pbase").value.trim()||info.default_branch;
+  const src=await gh(`/repos/${S.repo}/git/trees/${encodeURIComponent(S.branch)}?recursive=1`);
+  const files=artifactFiles(src.tree,item);
+  if(!files.length)throw new Error("Not found on "+S.branch);
+  const dest=p=>(prefix?prefix+"/":"")+promoPath(item,p);
+  const entries=[];
+  for(const f of files){
+   const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
+   const nb=await gh(`/repos/${repo}/git/blobs`,{method:"POST",body:JSON.stringify({content:b.content.replace(/\n/g,""),encoding:"base64"})});
+   entries.push({path:dest(f.path),mode:f.mode,type:"blob",sha:nb.sha});
+  }
+  const ref=await gh(`/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
+  const commit=await gh(`/repos/${repo}/git/commits/${ref.object.sha}`);
+  const tree=await gh(`/repos/${repo}/git/trees`,{method:"POST",body:JSON.stringify({base_tree:commit.tree.sha,tree:entries})});
+  const title=`Promote ${item.type} ${item.name}`;
+  const nc=await gh(`/repos/${repo}/git/commits`,{method:"POST",body:JSON.stringify({message:title+`\n\nPromoted from ${S.repo}@${S.branch}`,tree:tree.sha,parents:[ref.object.sha]})});
+  const branch=`promote/${item.name}-${Date.now().toString(36)}`;
+  await gh(`/repos/${repo}/git/refs`,{method:"POST",body:JSON.stringify({ref:`refs/heads/${branch}`,sha:nc.sha})});
+  const pr=await gh(`/repos/${repo}/pulls`,{method:"POST",body:JSON.stringify({title,head:branch,base,body:`Promoted from \`${S.repo}\` (branch \`${S.branch}\`):\n\n${entries.map(e=>"- `"+e.path+"`").join("\n")}`})});
+  localStorage.setItem("gh_promo",JSON.stringify({repo,base:$("#pbase").value.trim(),prefix}));
+  msg("PR opened:","ok",pr.html_url);
+ }catch(e){msg(e.message+(e.status===404?" (token needs access to the target repo: Contents + Pull requests write)":""),"err")}
+ $("#pgo").disabled=false;
+}
 const SINGLETONS_REV=Object.fromEntries(Object.entries(SINGLETONS).map(([p,n])=>[n,p]));
 
 $("#signin").onclick=async()=>{
