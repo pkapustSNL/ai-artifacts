@@ -83,6 +83,7 @@ summary{cursor:pointer;color:var(--gold)}
   <input id="target2" class="tgt" placeholder="Commit to branch (blank = loaded; new name creates it)" autocapitalize="off" autocorrect="off">
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
+  <div class="row"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button></div>
  </div>
 </div>
 
@@ -161,7 +162,7 @@ async function loadRepo(){
   localStorage.setItem("gh_repo",repo);
   $("#branch").value=branch;document.querySelectorAll(".tgt").forEach(e=>e.value="");
   $("#title").textContent="🌹 "+repo;
-  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#path").textContent="Select an artifact";
+  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
   document.body.classList.remove("editing");
   render();msg(t.truncated?"Repo is large; list may be incomplete":"","err");
  }catch(e){msg(e.message,"err")}
@@ -174,6 +175,7 @@ async function openItem(p){
   S.cur={path:p,sha:f.sha};S.dirty=false;
   $("#path").textContent=`${p} @ ${S.branch}`;
   $("#content").value=b64d(f.content);$("#content").disabled=false;$("#save").disabled=false;
+  $("#delete").disabled=false;$("#rename").disabled=!!SINGLETONS[p];
   document.body.classList.add("editing");msg("");render();
  }catch(e){msg(e.message,"err")}
 }
@@ -225,6 +227,77 @@ async function create(){
   await loadRepo();await openItem(path);
  }catch(e){msg(e.message,"err")}
 }
+// Artifact paths a change touches: the whole folder for skills, else the single file.
+function artifactFiles(tree,item){
+ const m=item.path.match(/^(\.github\/skills\/[^/]+)\/SKILL\.md$/);
+ return tree.filter(e=>e.type==="blob"&&(m?e.path.startsWith(m[1]+"/"):e.path===item.path));
+}
+
+async function commitChanges(message,build){
+ const target=$("#target").value.trim()||S.branch;
+ await ensureBranch(target);
+ const ref=await gh(`/repos/${S.repo}/git/ref/heads/${encodeURIComponent(target)}`);
+ const commit=await gh(`/repos/${S.repo}/git/commits/${ref.object.sha}`);
+ const t=await gh(`/repos/${S.repo}/git/trees/${commit.tree.sha}?recursive=1`);
+ const entries=await build(t.tree);
+ const nt=await gh(`/repos/${S.repo}/git/trees`,{method:"POST",body:JSON.stringify({base_tree:commit.tree.sha,tree:entries})});
+ const nc=await gh(`/repos/${S.repo}/git/commits`,{method:"POST",body:JSON.stringify({message,tree:nt.sha,parents:[ref.object.sha]})});
+ await gh(`/repos/${S.repo}/git/refs/heads/${encodeURIComponent(target)}`,{method:"PATCH",body:JSON.stringify({sha:nc.sha})});
+ return target;
+}
+
+async function afterChange(target){
+ if(target!==S.branch)$("#branch").value=target;
+ S.dirty=false;
+ await loadRepo();
+}
+
+async function del(){
+ if(!S.cur)return;
+ const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
+ if(!confirm(`Delete ${item.type==="skill"?"skill folder for ":""}${item.name}?`))return;
+ try{
+  msg("Deleting…");
+  const target=await commitChanges($("#commitmsg").value.trim()||`Delete ${item.path}`,
+   tree=>{const fs=artifactFiles(tree,item);if(!fs.length)throw new Error("Not found on target branch");return fs.map(f=>({path:f.path,mode:f.mode,type:"blob",sha:null}))});
+  $("#commitmsg").value="";
+  await afterChange(target);msg("Deleted on "+target,"ok");
+ }catch(e){msg(e.message,"err")}
+}
+
+async function rename(){
+ if(!S.cur||SINGLETONS[S.cur.path])return;
+ if(S.dirty)return msg("Save or discard your edits before renaming","err");
+ const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
+ const name=(prompt("New name",item.name)||"").trim();
+ if(!name||name===item.name)return;
+ if(!NAME_RE.test(name))return msg("Invalid name","err");
+ const newPath=TYPES[item.type].file(name);
+ try{
+  msg("Renaming…");
+  const target=await commitChanges($("#commitmsg").value.trim()||`Rename ${item.name} to ${name}`,async tree=>{
+   const fs=artifactFiles(tree,item);if(!fs.length)throw new Error("Not found on target branch");
+   const oldRoot=item.type==="skill"?item.path.replace(/\/SKILL\.md$/,""):item.path;
+   const newRoot=item.type==="skill"?newPath.replace(/\/SKILL\.md$/,""):newPath;
+   if(tree.some(e=>e.path===newRoot||e.path.startsWith(newRoot+"/")))throw new Error("Already exists on "+target0());
+   const out=[];
+   for(const f of fs){
+    const np=newRoot+f.path.slice(oldRoot.length);
+    let sha=f.sha;
+    if(item.type==="skill"&&f.path===item.path){
+     const b=await gh(`/repos/${S.repo}/git/blobs/${f.sha}`);
+     const txt=b64d(b.content.replace(/\n/g,"")).replace(/^(name:\s*).*$/m,`$1${name}`);
+     sha=(await gh(`/repos/${S.repo}/git/blobs`,{method:"POST",body:JSON.stringify({content:b64e(txt),encoding:"base64"})})).sha;
+    }
+    out.push({path:np,mode:f.mode,type:"blob",sha},{path:f.path,mode:f.mode,type:"blob",sha:null});
+   }
+   return out;
+  });
+  $("#commitmsg").value="";
+  await afterChange(target);await openItem(newPath);msg("Renamed on "+target,"ok");
+ }catch(e){msg(e.message,"err")}
+}
+const target0=()=>$("#target").value.trim()||S.branch;
 const SINGLETONS_REV=Object.fromEntries(Object.entries(SINGLETONS).map(([p,n])=>[n,p]));
 
 $("#signin").onclick=async()=>{
@@ -242,6 +315,8 @@ $("#list").onclick=e=>{const i=e.target.closest(".item");if(i)openItem(i.dataset
 $("#content").oninput=()=>S.dirty=true;
 $("#save").onclick=save;
 $("#create").onclick=create;
+$("#delete").onclick=del;
+$("#rename").onclick=rename;
 $("#back").onclick=()=>{if(!S.dirty||confirm("Discard unsaved changes?")){S.dirty=false;document.body.classList.remove("editing")}};
 document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();save()}});
 window.addEventListener("beforeunload",e=>{if(S.dirty){e.preventDefault();e.returnValue=""}});

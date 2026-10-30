@@ -11,6 +11,7 @@ A static installable PWA served from the repo root by GitHub Pages: https://pkap
   this browser's localStorage and only sent to api.github.com.
 - On iPhone: open the URL in Safari > Share > Add to Home Screen.
 - To commit to a different branch (e.g. a protected `main`), fill in "Commit to branch"; it is created if missing.
+- Use **Rename** / **Delete** in the editor. Each is a single commit (skills move or delete their whole folder; renaming a skill also updates its `name:`). Both honour "Commit to branch".
 
 ## Local server (`server.js`)
 
