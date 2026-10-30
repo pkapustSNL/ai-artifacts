@@ -294,7 +294,7 @@ async function rename(){
  const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
  const name=(prompt("New name",item.name)||"").trim();
  if(!name||name===item.name)return;
- if(!NAME_RE.test(name))return msg("Invalid name","err");
+ if(!validName(item.type,name))return msg("Invalid name","err");
  const newPath=TYPES[item.type].file(name);
  try{
   msg("Renaming…");
