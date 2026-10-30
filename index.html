@@ -27,7 +27,7 @@ h3{margin:12px 0 2px;font-size:12px;text-transform:uppercase;color:#888}
 .item:hover,.item.sel{background:var(--bg2)}.tag{font-size:12px;color:#888}
 .row{display:flex;gap:8px}.row>*{flex:1;min-width:0}
 #path{font-size:13px;color:#888;word-break:break-all}
-#msg{font-size:14px;min-height:1.2em}.err{color:#d33}.ok{color:#2a8a2a}
+#msg{font-size:14px;padding:0 12px}#msg:not(:empty){padding:8px 12px;border-bottom:1px solid var(--bd)}.err{color:#d33}.ok{color:#2a8a2a}
 #login{max-width:460px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:10px}
 small{color:#888;line-height:1.4}
 .hidden{display:none!important}
@@ -45,6 +45,8 @@ small{color:#888;line-height:1.4}
  <button id="reload" class="hidden">↻</button>
  <button id="logout" class="hidden">Sign out</button>
 </header>
+
+<div id="msg" role="status"></div>
 
 <div id="login" class="hidden">
  <p>Manage agents, instructions, prompts, skills and hooks stored in your GitHub repos.</p>
@@ -78,7 +80,6 @@ small{color:#888;line-height:1.4}
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <input id="target" placeholder="Commit to branch (blank = loaded branch)" autocapitalize="off" autocorrect="off">
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
-  <div id="msg"></div>
  </div>
 </div>
 
