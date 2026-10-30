@@ -1,4 +1,4 @@
-const CACHE = "artifacts-v5";
+const CACHE = "artifacts-v6";
 const SHELL = ["./", "index.html", "scripts/core.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
