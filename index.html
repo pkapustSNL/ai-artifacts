@@ -64,7 +64,7 @@ small{color:#888;line-height:1.4}
    <input id="branch" placeholder="branch (default)" autocapitalize="off" autocorrect="off">
    <button id="load" class="primary">Load</button>
   </div>
-  <input id="target" placeholder="Commit to branch (blank = loaded; new name creates it)" autocapitalize="off" autocorrect="off">
+  <input id="target" class="tgt" placeholder="Commit to branch (blank = loaded; new name creates it)" autocapitalize="off" autocorrect="off">
   <input id="filter" placeholder="Filter…">
   <details>
    <summary>New artifact</summary>
@@ -78,6 +78,7 @@ small{color:#888;line-height:1.4}
  </div>
  <div id="editor">
   <div id="path">Select an artifact</div>
+  <input id="target2" class="tgt" placeholder="Commit to branch (blank = loaded; new name creates it)" autocapitalize="off" autocorrect="off">
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
  </div>
@@ -156,7 +157,7 @@ async function loadRepo(){
   const t=await gh(`/repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
   Object.assign(S,{repo,branch,items:classify(t.tree),cur:null,dirty:false});
   localStorage.setItem("gh_repo",repo);
-  $("#branch").value=branch;$("#target").value="";
+  $("#branch").value=branch;document.querySelectorAll(".tgt").forEach(e=>e.value="");
   $("#title").textContent=repo;
   $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#path").textContent="Select an artifact";
   document.body.classList.remove("editing");
@@ -234,6 +235,7 @@ $("#logout").onclick=()=>{localStorage.removeItem("gh_token");S.token="";S.items
 $("#load").onclick=loadRepo;
 $("#reload").onclick=()=>{if(S.repo)loadRepo()};
 $("#filter").oninput=render;
+document.querySelectorAll(".tgt").forEach(e=>e.oninput=()=>document.querySelectorAll(".tgt").forEach(o=>o.value=e.value));
 $("#list").onclick=e=>{const i=e.target.closest(".item");if(i)openItem(i.dataset.path)};
 $("#content").oninput=()=>S.dirty=true;
 $("#save").onclick=save;
