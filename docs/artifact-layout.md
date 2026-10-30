@@ -80,15 +80,17 @@ needs a path mapping, not a plain copy.
 | Staging path | Company repo path | Notes |
 |---|---|---|
 | `.github/agents/<n>.agent.md` | `agents/<n>.agent.md` | Org-wide agent |
-| `.github/instructions/<n>.instructions.md` | ⚠️ `instructions/<n>.instructions.md` | Not an org-scope feature as far as known. Treated as a **template library** that teams copy into their own repos |
-| `.github/prompts/<n>.prompt.md` | ⚠️ `prompts/<n>.prompt.md` | Template library, as above |
-| `.github/skills/<n>/SKILL.md` (+ folder) | ⚠️ `skills/<n>/SKILL.md` | Template library, as above |
-| `.github/hooks/<n>.json` | ⚠️ `hooks/<n>.json` | Template library, as above |
-| `.github/copilot-instructions.md`, `AGENTS.md` | not promoted by default | Repo-specific; use a template under `templates/` if needed |
+| `.github/instructions/<n>.instructions.md` | `instructions/<n>.instructions.md` | Not an org-scope feature as far as known. Treated as a **template library** that teams copy into their own repos |
+| `.github/prompts/<n>.prompt.md` | `prompts/<n>.prompt.md` | Template library, as above |
+| `.github/skills/<n>/SKILL.md` (+ folder) | `skills/<n>/SKILL.md` | Template library, as above |
+| `.github/hooks/<n>.json` | `hooks/<n>.json` | Template library, as above |
+| `.github/copilot-instructions.md` | `templates/copilot-instructions.md` | Template library |
+| `AGENTS.md` | `templates/AGENTS.md` | Template library |
 
-Only **agents** are known to take effect from the company repo directly. Other
-types are stored there as a curated library that product repos copy from. ⚠️
-If the company repo already uses a different structure, that structure wins and
+**Decision:** all artifact types are promoted. Only **agents** are known to
+take effect from the company repo directly; the other types are a curated
+library that product repos copy from. ⚠️ Whether the other folders take effect
+is unverified. If the company repo already uses a different structure, that structure wins and
 this table changes.
 
 ## 5. Naming and quality rules
@@ -106,7 +108,7 @@ this table changes.
 1. Draft and edit in this staging repo, on a branch.
 2. `scripts/validate.js` and the `artifact-tester` agent check it.
 3. **Promote** computes the destination with the mapping in section 4
-   (replacing today's single free-text "path prefix"), copies the artifact
+   (the optional path prefix field remains for extra nesting), copies the artifact
    (a whole folder for skills), and opens a PR in the company repo.
 4. A human reviews and merges in the company repo.
 5. Repos and teams consume it: agents automatically, other types by copy.
@@ -115,8 +117,7 @@ this table changes.
 
 1. What structure does `snl-Engineering/.github` use today? (It was not visible
    to the build agent's token.)
-2. Should instructions, prompts, skills and hooks be promoted at all, or should
-   only agents go to the company repo?
+2. ~~Which types to promote?~~ Decided: all of them.
 3. Is a separate `.github-private` repo preferable for agents that should not
    be publicly readable? Both locations work the same way for org agents.
 4. Should promotion be a PR to the company repo (current design) or a
