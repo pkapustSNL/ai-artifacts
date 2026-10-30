@@ -21,3 +21,14 @@ WORKSPACE=/path/to/repo node server.js   # http://localhost:4173
 ```
 
 Env vars: `WORKSPACE` (default: cwd), `USER_DIR` (default: `~/.copilot`), `PORT` (default: 4173).
+
+## Validating artifacts before promotion
+
+```
+node scripts/validate.js   # checks .github/ artifacts and AGENTS.md
+node --test test/          # tests for the validator
+```
+
+Checks: file path/suffix, frontmatter (`description`; `name` matching the folder for skills), valid hook JSON,
+leftover template/TODO text, and likely secrets. The same checks run on every pull request
+(`.github/workflows/validate.yml`). Freshly created artifacts fail until the template text is replaced.
