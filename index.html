@@ -84,7 +84,7 @@ summary{cursor:pointer;color:var(--gold)}
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
   <div class="row"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button><button id="promote" disabled>Promote</button></div>
-  <div class="row"><button id="subadd" disabled>＋ Sub-instruction</button></div>
+  <div class="row"><button id="subadd" disabled>＋ child-instruction</button></div>
   <details id="promo"><summary>🚀 Promote to company repo</summary>
    <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
     <input id="prepo" placeholder="owner/repo" autocapitalize="off" autocorrect="off">
@@ -247,7 +247,7 @@ async function addSub(){
  const it=S.cur&&item0(S.cur.path);
  if(!it||it.type!=="instruction"||SINGLETONS[it.path])return;
  if(S.dirty)return msg("Save or discard your edits first","err");
- const child=(prompt(`Sub-instruction name under "${it.name}"`)||"").trim();
+ const child=(prompt(`Child-instruction name under "${it.name}"`)||"").trim();
  if(child)await createArtifact("instruction",it.name+"/"+child);
 }
 // Artifact paths a change touches: the whole folder for skills, else the single file.

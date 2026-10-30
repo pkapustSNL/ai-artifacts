@@ -11,7 +11,7 @@ A static installable PWA served from the repo root by GitHub Pages: https://pkap
   this browser's localStorage and only sent to api.github.com.
 - On iPhone: open the URL in Safari > Share > Add to Home Screen.
 - To commit to a different branch (e.g. a protected `main`), fill in "Commit to branch"; it is created if missing.
-- Instructions can be nested: name them `parent/child` (or use **＋ Sub-instruction** on an open instruction) to create `.github/instructions/parent/child.instructions.md`; children are listed indented under their parent. Renaming a parent does not move its children.
+- Instructions can be nested: name them `parent/child` (or use **＋ child-instruction** on an open instruction) to create `.github/instructions/parent/child.instructions.md`; children are listed indented under their parent. Renaming a parent does not move its children.
 - Use **Rename** / **Delete** in the editor. Each is a single commit (skills move or delete their whole folder; renaming a skill also updates its `name:`). Both honour "Commit to branch".
 - **Promote** opens a PR in a target repo (default `snl-Engineering/.github`) containing the artifact (a skill promotes its whole folder). Your token needs Contents and Pull requests write access to that repo. Paths follow `docs/artifact-layout.md` (agents → `agents/`, other types → `instructions/`, `prompts/`, `skills/`, `hooks/`, singletons → `templates/`); an optional prefix adds nesting.
 
