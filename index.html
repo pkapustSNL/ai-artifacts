@@ -72,7 +72,7 @@ summary{cursor:pointer;color:var(--gold)}
    <summary>🌀 New artifact</summary>
    <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
     <select id="type"></select>
-    <input id="name" placeholder="name (e.g. code-reviewer)" autocapitalize="off">
+    <input id="name" placeholder="name (instructions: parent/child ok)" autocapitalize="off">
     <button id="create">Create</button>
    </div>
   </details>
@@ -84,6 +84,7 @@ summary{cursor:pointer;color:var(--gold)}
   <textarea id="content" disabled spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
   <div class="row"><input id="commitmsg" placeholder="Commit message (optional)"><button id="save" class="primary" disabled>Save</button></div>
   <div class="row"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button><button id="promote" disabled>Promote</button></div>
+  <div class="row"><button id="subadd" disabled>＋ Sub-instruction</button></div>
   <details id="promo"><summary>🚀 Promote to company repo</summary>
    <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
     <input id="prepo" placeholder="owner/repo" autocapitalize="off" autocorrect="off">
@@ -100,7 +101,7 @@ const $=s=>document.querySelector(s);
 const API="https://api.github.com";
 const TYPES={
  agent:{label:"Agents",file:n=>`.github/agents/${n}.agent.md`,re:/^\.github\/agents\/([^/]+)\.agent\.md$/},
- instruction:{label:"Instructions",file:n=>`.github/instructions/${n}.instructions.md`,re:/^\.github\/instructions\/([^/]+)\.instructions\.md$/},
+ instruction:{label:"Instructions",file:n=>`.github/instructions/${n}.instructions.md`,re:/^\.github\/instructions\/((?:[^/]+\/){0,2}[^/]+)\.instructions\.md$/},
  prompt:{label:"Prompts",file:n=>`.github/prompts/${n}.prompt.md`,re:/^\.github\/prompts\/([^/]+)\.prompt\.md$/},
  skill:{label:"Skills",file:n=>`.github/skills/${n}/SKILL.md`,re:/^\.github\/skills\/([^/]+)\/SKILL\.md$/},
  hook:{label:"Hooks",file:n=>`.github/hooks/${n}.json`,re:/^\.github\/hooks\/([^/]+)\.json$/},
@@ -114,6 +115,8 @@ const TEMPLATES={
  hook:()=>`{\n  "version": 1,\n  "hooks": {\n    "preToolUse": []\n  }\n}\n`,
 };
 const NAME_RE=/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+// Instructions may be nested as parent/child (up to 3 levels) in subfolders of .github/instructions.
+const validName=(type,n)=>(type==="instruction"?n.split("/").length<=3:!n.includes("/"))&&n.split("/").every(x=>NAME_RE.test(x));
 const S={token:localStorage.getItem("gh_token")||"",repo:"",branch:"",items:[],cur:null,dirty:false};
 
 const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -151,10 +154,11 @@ function classify(tree){
 function render(){
  const f=$("#filter").value.toLowerCase();let h="";
  for(const t in TYPES){
-  const xs=S.items.filter(i=>i.type===t&&i.name.toLowerCase().includes(f));
+  const xs=S.items.filter(i=>i.type===t&&i.name.toLowerCase().includes(f)).sort((a,b)=>a.name.localeCompare(b.name));
   if(!xs.length)continue;
   h+=`<h3>${TYPES[t].label} (${xs.length})</h3>`;
-  for(const i of xs)h+=`<div class="item${S.cur&&S.cur.path===i.path?" sel":""}" data-path="${esc(i.path)}"><span>${esc(i.name)}</span></div>`;
+  for(const i of xs){const d=i.name.split("/").length-1,leaf=i.name.split("/").pop();
+   h+=`<div class="item${S.cur&&S.cur.path===i.path?" sel":""}" data-path="${esc(i.path)}" style="padding-left:${12+d*18}px"><span>${d?"↳ ":""}${esc(leaf)}</span></div>`}
  }
  $("#list").innerHTML=h||(S.repo?"<small>🎸 Nothing here yet. Start a new jam above.</small>":"");
 }
@@ -171,12 +175,13 @@ async function loadRepo(){
   localStorage.setItem("gh_repo",repo);
   $("#branch").value=branch;document.querySelectorAll(".tgt").forEach(e=>e.value="");
   $("#title").textContent="🌹 "+repo;
-  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#promote").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
+  $("#content").value="";$("#content").disabled=true;$("#save").disabled=true;$("#delete").disabled=true;$("#promote").disabled=true;$("#subadd").disabled=true;$("#rename").disabled=true;$("#path").textContent="Select an artifact";
   document.body.classList.remove("editing");
   render();msg(t.truncated?"Repo is large; list may be incomplete":"","err");
  }catch(e){msg(e.message,"err")}
 }
 
+const item0=p=>S.items.find(i=>i.path===p);
 async function openItem(p){
  if(S.dirty&&!confirm("Discard unsaved changes?"))return;
  try{
@@ -184,7 +189,7 @@ async function openItem(p){
   S.cur={path:p,sha:f.sha};S.dirty=false;
   $("#path").textContent=`${p} @ ${S.branch}`;
   $("#content").value=b64d(f.content);$("#content").disabled=false;$("#save").disabled=false;
-  $("#delete").disabled=false;$("#promote").disabled=false;$("#rename").disabled=!!SINGLETONS[p];
+  $("#delete").disabled=false;$("#promote").disabled=false;$("#subadd").disabled=!(item0(p)&&item0(p).type==="instruction"&&!SINGLETONS[p]);$("#rename").disabled=!!SINGLETONS[p];
   document.body.classList.add("editing");msg("");render();
  }catch(e){msg(e.message,"err")}
 }
@@ -224,9 +229,11 @@ async function save(){
 }
 
 async function create(){
- const type=$("#type").value,name=$("#name").value.trim();
+ await createArtifact($("#type").value,$("#name").value.trim());
+}
+async function createArtifact(type,name){
  if(!S.repo)return msg("Load a repo first","err");
- if(!NAME_RE.test(name))return msg("Invalid name","err");
+ if(!validName(type,name))return msg("Invalid name","err");
  const path=SINGLETONS_REV[name]&&type==="instruction"?SINGLETONS_REV[name]:TYPES[type].file(name);
  try{
   msg("Creating…");
@@ -235,6 +242,13 @@ async function create(){
   if(r.target!==S.branch)$("#branch").value=r.target;
   await loadRepo();await openItem(path);
  }catch(e){msg(e.message,"err")}
+}
+async function addSub(){
+ const it=S.cur&&item0(S.cur.path);
+ if(!it||it.type!=="instruction"||SINGLETONS[it.path])return;
+ if(S.dirty)return msg("Save or discard your edits first","err");
+ const child=(prompt(`Sub-instruction name under "${it.name}"`)||"").trim();
+ if(child)await createArtifact("instruction",it.name+"/"+child);
 }
 // Artifact paths a change touches: the whole folder for skills, else the single file.
 function artifactFiles(tree,item){
@@ -280,7 +294,7 @@ async function rename(){
  const item=S.items.find(i=>i.path===S.cur.path);if(!item)return;
  const name=(prompt("New name",item.name)||"").trim();
  if(!name||name===item.name)return;
- if(!NAME_RE.test(name))return msg("Invalid name","err");
+ if(!validName(item.type,name))return msg("Invalid name","err");
  const newPath=TYPES[item.type].file(name);
  try{
   msg("Renaming…");
@@ -367,6 +381,7 @@ $("#list").onclick=e=>{const i=e.target.closest(".item");if(i)openItem(i.dataset
 $("#content").oninput=()=>S.dirty=true;
 $("#save").onclick=save;
 $("#create").onclick=create;
+$("#subadd").onclick=addSub;
 $("#delete").onclick=del;
 $("#promote").onclick=()=>{$("#promo").open=true;$("#promo").scrollIntoView()};
 $("#pgo").onclick=promote;

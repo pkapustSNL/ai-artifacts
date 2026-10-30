@@ -61,8 +61,11 @@ function validate(root) {
   let count = 0;
 
   for (const kind of KINDS) {
-    for (const e of list(path.join(gh, kind.dir))) {
-      const f = path.join(gh, kind.dir, e.name);
+    // Instructions may be nested in subfolders (parent/child.instructions.md).
+    const walk = (d, rel0 = "") => list(d).flatMap((e) =>
+      e.isDirectory() && kind.dir === "instructions" ? walk(path.join(d, e.name), rel0 + e.name + "/") : [{ e, rel0 }]);
+    for (const { e, rel0 } of walk(path.join(gh, kind.dir))) {
+      const f = path.join(gh, kind.dir, rel0, e.name);
       if (!e.isFile()) continue;
       if (!e.name.endsWith(kind.suffix)) {
         problems.push({ file: rel(f), level: "error", msg: `expected suffix ${kind.suffix}` });
@@ -70,7 +73,7 @@ function validate(root) {
       }
       count++;
       const name = e.name.slice(0, -kind.suffix.length);
-      if (!NAME_RE.test(name)) problems.push({ file: rel(f), level: "error", msg: "invalid name" });
+      if (!NAME_RE.test(name) || !rel0.split("/").filter(Boolean).every((x) => NAME_RE.test(x))) problems.push({ file: rel(f), level: "error", msg: "invalid name" });
       const text = read(f);
       checkContent(rel(f), text, problems);
       if (kind.json) {
