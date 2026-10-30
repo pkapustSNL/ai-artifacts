@@ -31,6 +31,21 @@ const TEMPLATES = {
 
 const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
+// Instructions may be nested as parent/child (up to 3 levels) in subfolders.
+const validName = (type, n) => {
+  const parts = String(n || "").split("/");
+  return parts.length <= (type === "instruction" ? 3 : 1) && parts.every((x) => NAME_RE.test(x));
+};
+
+function walkNested(dir, suffix, prefix = "", depth = 1) {
+  const out = [];
+  for (const e of readDir(dir)) {
+    if (e.isFile() && e.name.endsWith(suffix)) out.push({ name: prefix + e.name.slice(0, -suffix.length), file: path.join(dir, e.name) });
+    else if (e.isDirectory() && depth < 3) out.push(...walkNested(path.join(dir, e.name), suffix, prefix + e.name + "/", depth + 1));
+  }
+  return out;
+}
+
 const readDir = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }); } catch { return []; } };
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 
@@ -53,6 +68,8 @@ function scan() {
           const f = path.join(s.base, "skills", e.name, "SKILL.md");
           if (e.isDirectory() && isFile(f)) add(type, e.name, f);
         }
+      } else if (type === "instruction") {
+        for (const x of walkNested(path.join(s.base, t.list), t.suffix)) add(type, x.name, x.file);
       } else {
         for (const e of readDir(path.join(s.base, t.list))) {
           if (e.isFile() && e.name.endsWith(t.suffix)) add(type, e.name.slice(0, -t.suffix.length), path.join(s.base, t.list, e.name));
@@ -112,7 +129,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/artifact") {
       const { scope, type, name, content } = await readBody(req);
-      if (!SCOPES[scope] || !TYPES[type] || !NAME_RE.test(name || "")) return send(res, 400, { error: "invalid scope, type or name" });
+      if (!SCOPES[scope] || !TYPES[type] || !validName(type, name)) return send(res, 400, { error: "invalid scope, type or name" });
       const file = singletonPath(scope, type, name) || path.join(SCOPES[scope].base, TYPES[type].file(name));
       if (fs.existsSync(file)) return send(res, 409, { error: "already exists" });
       fs.mkdirSync(path.dirname(file), { recursive: true });
